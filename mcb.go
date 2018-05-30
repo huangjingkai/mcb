@@ -67,16 +67,6 @@ func main() {
     fmt.Println(time.Unix(beforeTimeMS/1e9, 0).String()) //输出当前英文时间戳格式  
     fmt.Println(time.Unix(afterTimeMS/1e9, 0).String()) //输出当前英文时间戳格式  
 
-    for {
-        select {
-        case msg <- input:
-            println(msg)
-
-        case <-time.After(time.Second):
-            println("5s timer")
-        }
-    }
-
 	fmt.Printf("QPS: %d\r\nuserConfig.Requests=%d\r\nafterTime=%s %d\r\nbeforeTime=%s %d\r\n", 
 		QPS, 
 		userConfig.Requests, 
