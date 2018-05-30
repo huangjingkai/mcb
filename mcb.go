@@ -17,15 +17,17 @@ type UserConfig struct {
 	Clients   uint64
 	Requests  uint64
 	DataSize  uint64
+	Ratio     float64
 }
 
 var userConfig UserConfig
 
 func init() {
-	flag.Uint64Var(&userConfig.Clients, "clients", 50, "Number of parallel connections (default 50)")
-	flag.Uint64Var(&userConfig.Requests, "requests", 100000, "Total number of requests (default 100000)")
-	flag.Uint64Var(&userConfig.DataSize, "dataSize", 2, "Data size of SET/GET value in bytes (default 2)")
-	flag.StringSliceVar(&userConfig.IPs, "ips", []string{"127.0.0.1:11211"}, "Server hostname (default 127.0.0.1:11211), or can set 127.0.0.1:11211,127.0.0.2:11211")
+	flag.Uint64VarP(&userConfig.Clients, "clients", "c", 100, "Number of parallel connections (default 50)")
+	flag.Uint64VarP(&userConfig.Requests, "requests", "n", 100000, "Total number of requests (default 100000)")
+	flag.Uint64VarP(&userConfig.DataSize, "data-size", "d", 32, "Data size of SET/GET value in bytes (default 2)")
+	flag.Float64Var(&userConfig.Ratio, "ratio", 0.1, "Set:Get ratio (default: 1:10), [0.01 - 100]")
+	flag.StringSliceVarP(&userConfig.IPs, "addrs", "", []string{"127.0.0.1:11211"}, "Server hostname (default 127.0.0.1:11211), or can set 127.0.0.1:11211,127.0.0.2:11211")
 }
 
 func main() {
@@ -54,48 +56,16 @@ func main() {
 	// 如果开启此选项被踢除的server如果恢复正常将会再次被加入server列表
 	mc.SetRemoveBadServer(true)
 
-	// a := &Attacker{
-	// 	stopch:  make(chan struct{}), 
-	// 	workers: userConfig.Clients,
-	// 	mc: mc}
+	a := &Attacker{
+	 	stopch:  make(chan struct{}), 
+	 	workers: userConfig.Clients,
+	 	mc: mc}
 
 	results := make(chan *Result)
 
 	fmt.Println("Start Benchmark")
 	for i := uint64(0); i < userConfig.Clients; i++ {
-		go func(seq uint64, results chan *Result) {
-			name := "mcs" + "_" + strconv.FormatUint(seq, 10) + "_"
-			fmt.Println("Attack ", name, " Ready")
-
-			for j := uint64(0); ; j++ {
-				res := Result{
-					Attack: name,
-					Seq: j,
-					Timestamp: time.Now(),
-				}
-
-				key := name + strconv.FormatUint(j, 10)
-				ok, err := mc.Set(key, 0, 300)
-				if err != nil {
-					fmt.Println("mc.Set error, ", ok, err)
-				}
-				res.Latency = time.Since(res.Timestamp)
-
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-				mc.Get(key)
-
-				results <- &res
-			}
-
-		}(i, results)
+		go a.Attack(i, results, userConfig)
 	}
 
 	QPS := 0
