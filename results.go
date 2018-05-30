@@ -9,7 +9,8 @@ import (
 type Result struct {
 	Attack    string        `json:"attack"`
 	Seq       uint64        `json:"seq"`
-	Code      uint16        `json:"code"`
+	Command   string        `json:"command"`
+	Code      uint64        `json:"code"`
 	Timestamp time.Time     `json:"timestamp"`
 	Latency   time.Duration `json:"latency"`
 	BytesOut  uint64        `json:"bytes_out"`
