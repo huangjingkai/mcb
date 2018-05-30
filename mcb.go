@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"time"
+	"runtime"
 	"strconv"
 
 	//"strings"
@@ -13,23 +14,24 @@ import (
 
 type UserConfig struct {
 	IPs       []string
-	Clients   int
-	Requests  int64
-	DataSize  int
+	Clients   uint64
+	Requests  uint64
+	DataSize  uint64
 }
 
 var userConfig UserConfig
 
 func init() {
-	flag.IntVar(&userConfig.Clients, "clients", 50, "Number of parallel connections (default 50)")
-	flag.Int64Var(&userConfig.Requests, "requests", 100000, "Total number of requests (default 100000)")
-	flag.IntVar(&userConfig.DataSize, "dataSize", 2, "Data size of SET/GET value in bytes (default 2)")
+	flag.Uint64Var(&userConfig.Clients, "clients", 50, "Number of parallel connections (default 50)")
+	flag.Uint64Var(&userConfig.Requests, "requests", 100000, "Total number of requests (default 100000)")
+	flag.Uint64Var(&userConfig.DataSize, "dataSize", 2, "Data size of SET/GET value in bytes (default 2)")
 	flag.StringSliceVar(&userConfig.IPs, "ips", []string{"127.0.0.1:11211"}, "Server hostname (default 127.0.0.1:11211), or can set 127.0.0.1:11211,127.0.0.2:11211")
 }
 
 func main() {
     flag.Parse()
-    fmt.Println(userConfig)
+    fmt.Println("userConfig: ", userConfig)
+    runtime.GOMAXPROCS(runtime.NumCPU())
 
     mcs := []*memcache.Server{}
 
@@ -37,8 +39,8 @@ func main() {
     	mcs = append(mcs, &memcache.Server{
     		Address: ip,
     		Weight: 50,
-    		MaxConn: userConfig.Clients,
-    		InitConn: userConfig.Clients / 2,
+    		MaxConn: int(userConfig.Clients),
+    		InitConn: int(userConfig.Clients) / 2,
     		IdleTime: time.Hour * 2})
     }
 
@@ -48,29 +50,72 @@ func main() {
 		return
 	}
 
-	//设置是否自动剔除无法连接的server，默认不开启(建议开启)
-	//如果开启此选项被踢除的server如果恢复正常将会再次被加入server列表
+	// 设置是否自动剔除无法连接的server，默认不开启(建议开启)
+	// 如果开启此选项被踢除的server如果恢复正常将会再次被加入server列表
 	mc.SetRemoveBadServer(true)
 
-	beforeTimeMS := time.Now().UnixNano()
+	// a := &Attacker{
+	// 	stopch:  make(chan struct{}), 
+	// 	workers: userConfig.Clients,
+	// 	mc: mc}
 
-	for i := 0; i < int(userConfig.Requests); i++ {
-		res, err := mc.Set("test" + strconv.Itoa(i), 0, 300)
-		if err != nil {
-			fmt.Println("mc.Set error, ", res, err)
-		}
+	results := make(chan *Result)
+
+	fmt.Println("Start Benchmark")
+	for i := uint64(0); i < userConfig.Clients; i++ {
+		go func(seq uint64, results chan *Result) {
+			name := "mcs" + "_" + strconv.FormatUint(seq, 10) + "_"
+			fmt.Println("Attack ", name, " Ready")
+
+			for j := uint64(0); ; j++ {
+				res := Result{
+					Attack: name,
+					Seq: j,
+					Timestamp: time.Now(),
+				}
+
+				key := name + strconv.FormatUint(j, 10)
+				ok, err := mc.Set(key, 0, 300)
+				if err != nil {
+					fmt.Println("mc.Set error, ", ok, err)
+				}
+				res.Latency = time.Since(res.Timestamp)
+
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+				mc.Get(key)
+
+				results <- &res
+			}
+
+		}(i, results)
 	}
-	afterTimeMS := time.Now().UnixNano()
 
-	QPS := userConfig.Requests * 1e9  / (afterTimeMS - beforeTimeMS)
+	QPS := 0
+	go func() {
+		for {
+			select {
+			case <- results:
+			 	QPS = QPS + 11
+			}
+		}
+	}()
 
-    fmt.Println(time.Unix(beforeTimeMS/1e9, 0).String()) //输出当前英文时间戳格式  
-    fmt.Println(time.Unix(afterTimeMS/1e9, 0).String()) //输出当前英文时间戳格式  
+	for {
+		select {
+		case <- time.After(time.Second):
+			fmt.Printf("Time=%s ,QPS=%d\r\n", 
+				time.Now().Format("2006-01-02 15:04:05"), QPS)
+				QPS = 0
+			}
+	}
 
-	fmt.Printf("QPS: %d\r\nuserConfig.Requests=%d\r\nafterTime=%s %d\r\nbeforeTime=%s %d\r\n", 
-		QPS, 
-		userConfig.Requests, 
-		time.Unix(beforeTimeMS/1e9, 0).String(), 
-		afterTimeMS, time.Unix(afterTimeMS/1e9, 0).String(), 
-		beforeTimeMS)
+	fmt.Println("End Benchmark")
 }
